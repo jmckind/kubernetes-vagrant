@@ -14,6 +14,12 @@ Deploy Kubernetes on CoreOS using Vagrant and VirtualBox.
 
 ## Usage
 
+Create the TLS assets
+
+```
+$ make assets-tls
+```
+
 Start the cluster.
 
 ```
@@ -36,6 +42,12 @@ Connect to a specific cluster node via SSH.
 
 ```
 $ make ssh-cluster VM=kube-worker-n02
+```
+
+Destroy the cluster and clean up any temporary artifacts
+
+```
+$ make clean
 ```
 
 ## License
