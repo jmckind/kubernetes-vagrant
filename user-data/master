@@ -1,0 +1,135 @@
+#cloud-config
+
+---
+coreos:
+    etcd2:
+        advertise-client-urls: http://$public_ipv4:2379
+        initial-advertise-peer-urls: http://$private_ipv4:2380
+        listen-client-urls: http://0.0.0.0:2379,http://0.0.0.0:4001
+        listen-peer-urls: http://$private_ipv4:2380,http://$private_ipv4:7001
+        discovery: https://discovery.etcd.io/3166985e9bc5e39e1b66773f953fc1f1
+    fleet:
+        public-ip: $public_ipv4
+    flannel:
+        interface: $public_ipv4
+    units:
+        - name: etcd2.service
+          command: start
+        - name: fleet.service
+          command: start
+        - name: flanneld.service
+          drop-ins:
+              - name: 50-network-config.conf
+                content: |
+                    [Service]
+                    ExecStartPre=/usr/bin/etcdctl set /coreos.com/network/config '{ "Network": "10.1.0.0/16" }'
+                command: start
+              - name: docker-tcp.socket
+                command: start
+                enable: true
+                content: |
+                    [Unit]
+                    Description=Docker Socket for the API
+
+                    [Socket]
+                    ListenStream=2375
+                    Service=docker.service
+                    BindIPv6Only=both
+
+                    [Install]
+                    WantedBy=sockets.target
+    write_files:
+        - path: "/etc/flannel/options.env"
+          content: |
+              FLANNELD_IFACE=$private_ipv4
+              FLANNELD_ETCD_ENDPOINTS=http://172.17.8.101:4001,http://172.17.8.102:4001,http://172.17.8.103:4001
+        - path: "/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf"
+          content: |
+              [Service]
+              ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
+        - path: "/etc/systemd/system/docker.service.d/40-flannel.conf"
+          content: |
+              [Unit]
+              Requires=flanneld.service
+              After=flanneld.service
+        - path: "/etc/systemd/system/kubelet.service"
+          content: |
+              [Service]
+              ExecStartPre=/usr/bin/mkdir -p /etc/kubernetes/manifests
+
+              Environment=KUBELET_VERSION=latest
+              ExecStart=/usr/lib/coreos/kubelet-wrapper \
+                  --api-servers=http://127.0.0.1:8080 \
+                  --network-plugin-dir=/etc/kubernetes/cni/net.d \
+                  --network-plugin=cni \
+                  --register-schedulable=false \
+                  --allow-privileged=true \
+                  --config=/etc/kubernetes/manifests \
+                  --hostname-override=$public_ipv4 \
+                  --cluster-dns=$public_ipv4 \
+                  --cluster-domain=cluster.local
+              Restart=always
+              RestartSec=10
+
+              [Install]
+              WantedBy=multi-user.target
+        - path: "/etc/kubernetes/manifests/kube-apiserver.yaml"
+          content: |
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                  name: kube-apiserver
+                  namespace: kube-system
+              spec:
+                  hostNetwork: true
+                  containers:
+                      - name: kube-apiserver
+                        image: quay.io/coreos/hyperkube:v1.3.4_coreos.0
+                        command:
+                            - /hyperkube
+                            - apiserver
+                            - --bind-address=0.0.0.0
+                            - --etcd-servers=${ETCD_ENDPOINTS}
+                            - --allow-privileged=true
+                            - --service-cluster-ip-range=${SERVICE_IP_RANGE}
+                            - --secure-port=443
+                            - --advertise-address=${ADVERTISE_IP}
+                            - --admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,ResourceQuota
+                            - --tls-cert-file=/etc/kubernetes/ssl/apiserver.pem
+                            - --tls-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem
+                            - --client-ca-file=/etc/kubernetes/ssl/ca.pem
+                            - --service-account-key-file=/etc/kubernetes/ssl/apiserver-key.pem
+                            - --runtime-config=extensions/v1beta1=true,extensions/v1beta1/networkpolicies=true
+                        ports:
+                            - containerPort: 443
+                              hostPort: 443
+                              name: https
+                            - containerPort: 8080
+                              hostPort: 8080
+                              name: local
+                        volumeMounts:
+                            - mountPath: /etc/kubernetes/ssl
+                              name: ssl-certs-kubernetes
+                              readOnly: true
+                            - mountPath: /etc/ssl/certs
+                              name: ssl-certs-host
+                              readOnly: true
+                  volumes:
+                      - hostPath:
+                        path: /etc/kubernetes/ssl
+                        name: ssl-certs-kubernetes
+                      - hostPath:
+                        path: /usr/share/ca-certificates
+                        name: ssl-certs-host
+        - path: "/etc/kubernetes/manifests/kube-proxy.yaml"
+          content: |
+        - path: ""
+          content: |
+        - path: ""
+          content: |
+        - path: ""
+          content: |
+        - path: ""
+          content: |
+        - path: ""
+          content: |
